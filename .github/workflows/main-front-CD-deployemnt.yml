@@ -37,19 +37,19 @@ jobs:
 
       - name: Validate frontend API URL
         env:
-          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: |
           python - <<'PY'
           import os
 
           if not os.environ.get("VITE_API_URL"):
-              raise SystemExit("Missing VITE_API_URL GitHub repository variable")
+              raise SystemExit("Missing VITE_API_URL GitHub Actions secret")
           PY
 
       - name: Build frontend
         working-directory: frontend
         env:
-          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: npm run build
 
       - name: Read Firebase project ID from service account
