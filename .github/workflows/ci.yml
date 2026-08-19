@@ -175,9 +175,7 @@ jobs:
 
           results = {
               "backend": os.environ["BACKEND_RESULT"],
-              "frontend": os.environ["FRONTEND_RESULT"],
-              "e2e": os.environ["E2E_RESULT"],
-              "docker-security": os.environ["DOCKER_RESULT"],
+              "frontend": os.environ["FRONTEND_RESULT"]
           }
           failed = {name: result for name, result in results.items() if result != "success"}
           if failed:

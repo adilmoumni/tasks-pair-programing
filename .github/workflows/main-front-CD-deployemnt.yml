@@ -1,0 +1,82 @@
+name: Frontend CD - Firebase Hosting
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: firebase-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-frontend:
+    name: Deploy frontend to Firebase
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+
+      - name: Validate frontend API URL
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: |
+          python - <<'PY'
+          import os
+
+          if not os.environ.get("VITE_API_URL"):
+              raise SystemExit("Missing VITE_API_URL GitHub repository variable")
+          PY
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: npm run build
+
+      - name: Read Firebase project ID from service account
+        id: firebase-project
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          credentials = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+          if not credentials:
+              raise SystemExit("Missing FIREBASE_SERVICE_ACCOUNT GitHub secret")
+
+          project_id = json.loads(credentials).get("project_id")
+          if not project_id:
+              raise SystemExit("The service-account JSON has no project_id")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"project_id={project_id}\n")
+          PY
+
+      - name: Deploy live site
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: ${{ steps.firebase-project.outputs.project_id }}
+          channelId: live
+          entryPoint: .
