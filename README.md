@@ -7,3 +7,5 @@ Le projet doit être créé dans un monorepo afin de centraliser le frontend, le
 L’objectif ne se limite pas au développement fonctionnel : il faut aussi appliquer les bonnes pratiques de qualité, sécurité, revue de code et déploiement.
 
 
+
+Te
