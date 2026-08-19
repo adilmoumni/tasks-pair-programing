@@ -1,0 +1,186 @@
+name: CI
+
+on:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        working-directory: backend
+        run: pytest -q
+
+  frontend-tests:
+    name: Frontend tests and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run Vitest
+        working-directory: frontend
+        run: npm test
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  e2e-tests:
+    name: E2E tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: tasks
+          POSTGRES_USER: tasks
+          POSTGRES_PASSWORD: tasks_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tasks -d tasks"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://tasks:tasks_dev_password@127.0.0.1:5432/tasks
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Apply database migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install E2E dependencies
+        working-directory: e2e
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright scenario
+        working-directory: e2e
+        run: npm test
+
+  docker-security:
+    name: Docker build and Trivy scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Build backend image
+        run: docker build --tag tasks-backend:ci backend
+
+      - name: Build frontend image
+        run: docker build --tag tasks-frontend:ci frontend
+
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: tasks-backend:ci
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: tasks-frontend:ci
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  required:
+    name: Required
+    if: ${{ always() }}
+    needs:
+      - backend-tests
+      - frontend-tests
+      - e2e-tests
+      - docker-security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all CI jobs passed
+        env:
+          BACKEND_RESULT: ${{ needs.backend-tests.result }}
+          FRONTEND_RESULT: ${{ needs.frontend-tests.result }}
+          E2E_RESULT: ${{ needs.e2e-tests.result }}
+          DOCKER_RESULT: ${{ needs.docker-security.result }}
+        run: |
+          python - <<'PY'
+          import os
+
+          results = {
+              "backend": os.environ["BACKEND_RESULT"],
+              "frontend": os.environ["FRONTEND_RESULT"],
+              "e2e": os.environ["E2E_RESULT"],
+              "docker-security": os.environ["DOCKER_RESULT"],
+          }
+          failed = {name: result for name, result in results.items() if result != "success"}
+          if failed:
+              raise SystemExit(f"Required CI jobs did not pass: {failed}")
+          print("All required CI jobs passed.")
+          PY
