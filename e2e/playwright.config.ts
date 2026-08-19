@@ -6,7 +6,9 @@ export default defineConfig({
   reporter: 'html',
   webServer: [
     {
-      command: '.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000',
+      command: process.env.CI
+        ? 'uvicorn main:app --host 127.0.0.1 --port 8000'
+        : '.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000',
       cwd: '../backend',
       url: 'http://127.0.0.1:8000/health',
       reuseExistingServer: !process.env.CI,
